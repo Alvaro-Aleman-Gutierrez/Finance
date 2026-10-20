@@ -246,7 +246,7 @@ function calcular(c) {
   const totAPagar = plan.reduce((s, r) => s + r.aPagar, 0);
   const totP1 = plan.reduce((s, r) => s + r.p1, 0);
   const totP2 = plan.reduce((s, r) => s + r.p2, 0);
-  const pendiente = plan.reduce((s, r) => s + r.pend, 0);
+  const pendiente = plan.reduce((s, r) => s + Math.max(0, r.pend), 0);
 
   const cats = {};
   movs.forEach(mv => { cats[mv.cat || 'Sin categoría'] = (cats[mv.cat || 'Sin categoría'] || 0) + parteYo(mv); });
@@ -362,7 +362,7 @@ function vistaResumen() {
       return `<div class="plan-item">
         <div class="t"><b>${esc(p.dest)}${p.variable ? ` <span class="pill ${p.estimado ? 'blue' : 'green'}" data-recibo="${esc(p.dest)}" style="cursor:pointer">${p.estimado ? 'estimado · poner recibo' : 'recibo ✓'}</span>` : ''}</b><span>${crcFmt(pag)} <span class="hint">de ${crcFmt(p.aPagar)}</span></span></div>
         <div class="bar"><i style="width:${w}%"></i></div>
-        <div class="s"><span>1ª: ${crcFmt(p.p1)} · 2ª: ${crcFmt(p.p2)}</span><span class="${p.pend > 0.5 ? 'neg' : 'pos'}">${p.tipo === 'otro' ? '' : p.pend > 0.5 ? 'Falta ' + crcFmt(p.pend) : 'Listo'}</span></div>
+        <div class="s"><span>1ª: ${crcFmt(p.p1)} · 2ª: ${crcFmt(p.p2)}</span><span class="${p.pend > 0.5 ? 'neg' : 'pos'}">${p.tipo === 'otro' ? '' : p.pend > 0.5 ? 'Falta ' + crcFmt(p.pend) : p.pend < -0.5 ? 'Pagó ' + crcFmt(-p.pend) + ' de más' : 'Listo'}</span></div>
       </div>`;
     }).join('') || '<div class="empty">Sin pagos ni montos para este corte.</div>'}
     <div class="hint">Las tarjetas aparecen por el total del estado (incluye la parte de las otras personas, que luego le devuelven).</div>
