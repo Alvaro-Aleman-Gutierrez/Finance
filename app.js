@@ -398,7 +398,7 @@ function vistaResumen() {
   </div>
 
   ${r.otras.length ? `<div class="card"><h2>A cargo de otras personas</h2>
-    ${r.otras.map(o => `<div class="row"><span class="l">${esc(o.nombre)}</span><span class="r">${crcFmt(o.total)}</span></div>`).join('')}
+    ${r.otras.map(o => `<div class="row" data-verpersona="${esc(o.nombre)}" style="cursor:pointer"><span class="l">${esc(o.nombre)} ›</span><span class="r">${crcFmt(o.total)}</span></div>`).join('')}
     <div class="hint">Lo que le toca a cada persona en las tarjetas (incluye cuotas) y en los gastos fijos.</div></div>` : ''}
 
   <div class="card">
@@ -423,7 +423,7 @@ function agrupar(items, render1) {
   sorted.forEach(it => {
     const k = it.auto ? 'auto' : it.fecha || '';
     if (k !== last) {
-      out += `<div class="day">${k === 'auto' ? 'Cuotas del mes (se cargan solas)' : k ? fechaLarga(k) : 'Sin fecha'}</div>`;
+      out += `<div class="day">${k === 'auto' ? 'Cuotas y suscripciones (se cargan solas)' : k ? fechaLarga(k) : 'Sin fecha'}</div>`;
       last = k;
     }
     out += render1(it);
@@ -431,26 +431,82 @@ function agrupar(items, render1) {
   return out;
 }
 
+let verPersona = 'Todos'; // filtro de la pestaña Gastos
+
 function vistaMovs() {
+  if (verPersona !== 'Todos' && !A().personas.includes(verPersona)) verPersona = 'Todos';
+  const chips = `<div class="seg" style="margin:10px 0">${['Todos', ...A().personas].map(p =>
+    `<button type="button" data-verpersona="${esc(p)}" class="${p === verPersona ? 'on' : ''}">${esc(p)}</button>`).join('')}</div>`;
+  const buscar = `<input class="search" id="buscar" placeholder="Buscar comercio, categoría…" value="${esc(busqueda)}">`;
+  if (verPersona !== 'Todos') return chips + buscar + vistaPersona(verPersona);
+
   const movs = movsDe(corte).filter(mv => filtro(busqueda, mv));
   const tot = movs.reduce((s, mv) => s + montoCRC(mv), 0);
   const mi = movs.reduce((s, mv) => s + parteYo(mv), 0);
   const suya = movs.reduce((s, mv) => s + parteDe(mv, pareja()), 0);
   const resto = tot - mi - suya;
-  return `
-  <input class="search" id="buscar" placeholder="Buscar comercio, categoría…" value="${esc(busqueda)}">
+  const porPersona = A().personas.map(p => ({ p, v: movs.reduce((s, mv) => s + parteDe(mv, p), 0) }))
+    .filter(x => Math.abs(x.v) > 0.5);
+  return `${chips}${buscar}
   <div class="card">
     <div class="row total"><span class="l">${movs.length} gastos en este corte</span><span class="r">${crcFmt(tot)}</span></div>
-    <div class="row"><span class="l">Mi parte</span><span class="r">${crcFmt(mi)}</span></div>
-    <div class="row"><span class="l">Parte de ${esc(pareja())}</span><span class="r">${crcFmt(suya)}</span></div>
-    ${Math.abs(resto) > 0.5 ? `<div class="row"><span class="l">Otras personas</span><span class="r">${crcFmt(resto)}</span></div>` : ''}
+    ${porPersona.map(x => `<div class="row" data-verpersona="${esc(x.p)}" style="cursor:pointer"><span class="l">${x.p === yo() ? 'Mi parte' : 'Parte de ' + esc(x.p)} ›</span><span class="r">${crcFmt(x.v)}</span></div>`).join('')}
     ${tot > 0 ? `<div class="bar"><i style="width:${mi / tot * 100}%"></i><i class="o" style="width:${suya / tot * 100}%"></i>${resto > 0.5 ? `<i class="a" style="width:${resto / tot * 100}%"></i>` : ''}</div>` : ''}
+    <div class="hint">Toque una persona para ver solo sus gastos.</div>
   </div>
   <div class="card">${movs.length ? agrupar(movs, mv => `
     <div class="list-item" data-mov="${mv.id}">
       <div class="m"><b>${esc(mv.comercio)}</b><small>${esc(mv.tarjeta)} · ${esc(mv.cat)}${mv.resp === 'Compartido' ? ` · compartido (${esc(pareja())} ${crcFmt(parteDe(mv, pareja()))})` : mv.resp !== yo() ? ' · ' + esc(mv.resp) : ''}${mv.cuota ? ` · cuota ${mv.cuota}${mv.cuotas ? '/' + mv.cuotas : ''}` : ''}</small></div>
       <div class="amt">${montoFmt(mv.monto, mv.moneda)}${mv.moneda === 'USD' ? `<small>${crcFmt(montoCRC(mv))}</small>` : ''}</div>
     </div>`) : '<div class="empty">No hay gastos en este corte.</div>'}</div>
+  <div style="height:70px"></div>`;
+}
+
+// Gastos de una sola persona: solo lo que le toca (su parte de los compartidos), por tarjeta y categoría.
+function vistaPersona(p) {
+  const movs = movsDe(corte).filter(mv => parteDe(mv, p) !== 0 && filtro(busqueda, mv));
+  const parte = mv => parteDe(mv, p);
+  const tarj = movs.reduce((s, mv) => s + parte(mv), 0);
+  const fijos = A().fijos.map(f => ({ n: f.concepto, v: fijoMonto(f, p, corte) })).filter(x => Math.abs(x.v) > 0.5);
+  const totFijos = fijos.reduce((s, x) => s + x.v, 0);
+  const propios = movs.filter(mv => mv.resp === p).reduce((s, mv) => s + parte(mv), 0);
+  const compart = tarj - propios;
+
+  const suma = key => {
+    const o = {};
+    movs.forEach(mv => { const k = key(mv) || 'Sin categoría'; o[k] = (o[k] || 0) + parte(mv); });
+    return Object.entries(o).filter(([, v]) => Math.abs(v) > 0.5).sort((x, y) => y[1] - x[1]);
+  };
+  const porTarjeta = suma(mv => mv.tarjeta), porCat = suma(mv => mv.cat);
+  const maxC = Math.max(1, ...porCat.map(([, v]) => v));
+  const soy = p === yo();
+
+  return `
+  <div class="card hero">
+    <div class="lab">${soy ? 'Lo que me toca' : 'Le toca a ' + esc(p)} en este corte</div>
+    <div class="big">${crcFmt(tarj + totFijos)}</div>
+    <div class="kpis">
+      <div><small>Tarjetas</small><b>${crcFmt(tarj)}</b></div>
+      <div><small>${soy ? 'Gastos fijos' : 'Fijos'}</small><b>${crcFmt(totFijos)}</b></div>
+      <div><small>Gastos</small><b>${movs.length}</b></div>
+    </div>
+    ${compart > 0.5 ? `<div class="hint">Incluye ${crcFmt(compart)} de su parte en gastos compartidos.</div>` : ''}
+  </div>
+
+  ${porTarjeta.length ? `<div class="card"><h2>Por tarjeta</h2>
+    ${porTarjeta.map(([n, v]) => `<div class="row"><span class="l">${esc(n)}</span><span class="r">${crcFmt(v)}</span></div>`).join('')}</div>` : ''}
+
+  ${porCat.length ? `<div class="card"><h2>Por categoría</h2>
+    ${porCat.map(([n, v]) => `<div class="cat"><span class="n">${esc(n)}</span><span class="track"><i style="width:${Math.max(0, v) / maxC * 100}%"></i></span><span class="v">${crcFmt(v)}</span></div>`).join('')}</div>` : ''}
+
+  ${fijos.length ? `<div class="card"><h2>Gastos fijos</h2>
+    ${fijos.map(x => `<div class="row"><span class="l">${esc(x.n)}</span><span class="r">${crcFmt(x.v)}</span></div>`).join('')}</div>` : ''}
+
+  <div class="card">${movs.length ? agrupar(movs, mv => `
+    <div class="list-item" data-mov="${mv.id}">
+      <div class="m"><b>${esc(mv.comercio)}</b><small>${esc(mv.tarjeta)} · ${esc(mv.cat)}${mv.resp === 'Compartido' ? ' · compartido' : ''}${mv.cuota ? ` · cuota ${mv.cuota}${mv.cuotas ? '/' + mv.cuotas : ''}` : ''}</small></div>
+      <div class="amt">${crcFmt(parte(mv))}${mv.resp === 'Compartido' || mv.moneda === 'USD' ? `<small>de ${montoFmt(mv.monto, mv.moneda)}</small>` : ''}</div>
+    </div>`) : `<div class="empty">${esc(p)} no tiene gastos en tarjetas en este corte.</div>`}</div>
   <div style="height:70px"></div>`;
 }
 
@@ -511,8 +567,8 @@ function vistaAjustes() {
   </div>
 
   <div class="card">
-    <h2>Compras a cuotas y tasa cero</h2>
-    <div class="hint">Cada una se carga sola en su tarjeta cada mes, hasta la última cuota.</div>
+    <h2>Cuotas, tasa cero y suscripciones</h2>
+    <div class="hint">Cada una se carga sola en su tarjeta cada mes: las cuotas hasta la última; las suscripciones (sin número de cuota) todos los meses.</div>
     ${(S.cuotas || []).slice().sort((x, y) => (x.tarjeta + x.descripcion).localeCompare(y.tarjeta + y.descripcion)).map(pl => {
       const k = cuotaEn(pl, corteInicial());
       const fin = ultimoCorte(pl);
@@ -522,7 +578,7 @@ function vistaAjustes() {
         <div class="m"><b>${esc(pl.descripcion)}</b><small>${esc(pl.tarjeta)} · ${esc(pl.resp)} · ${estado}</small></div>
         <div class="amt">${montoFmt(pl.monto, pl.moneda)}<small>al mes</small></div></div>`;
     }).join('') || '<div class="empty">No hay compras a cuotas.</div>'}
-    <button class="btn block" data-act="addCuota">+ Agregar compra a cuotas</button>
+    <button class="btn block" data-act="addCuota">+ Agregar cuota o suscripción</button>
   </div>
 
   <div class="card">
@@ -603,6 +659,11 @@ function bindVista() {
     } else if (!confirm(`¿Quitar "${nombre}"?`)) return;
     A()[tipo] = [...new Set(A()[tipo].filter(x => x !== nombre))];
     save(); render();
+  }));
+  document.querySelectorAll('[data-verpersona]').forEach(el => el.addEventListener('click', () => {
+    verPersona = el.dataset.verpersona;
+    if (tab !== 'movs') return document.querySelector('nav.tabs [data-tab="movs"]').click();
+    render(); window.scrollTo(0, 0);
   }));
   const b = $('#buscar');
   if (b) b.addEventListener('input', () => {
@@ -826,14 +887,14 @@ function formCuota(pl) {
     primerCorte: corte, cuotaInicial: null, total: null };
   const kHoy = nuevo ? null : cuotaEn(pl, corte);
   abrirSheet(`
-    <h3>${nuevo ? 'Nueva compra a cuotas' : 'Compra a cuotas'}</h3>
-    <div class="hint" style="margin-bottom:8px">Monto de la cuota mensual. Se carga sola cada mes en la tarjeta.</div>
+    <h3>${nuevo ? 'Nueva cuota o suscripción' : 'Cargo mensual automático'}</h3>
+    <div class="hint" style="margin-bottom:8px">Monto que se cobra cada mes (con IVA, si aplica). Se carga solo en la tarjeta.</div>
     <div class="amount">
       <input id="c-monto" inputmode="decimal" placeholder="0" value="${pl.monto === '' ? '' : pl.monto}" autocomplete="off">
       ${seg('moneda', ['₡', '$'], pl.moneda === 'USD' ? '$' : '₡')}
     </div>
     <div class="field"><label>Tarjeta</label>${seg('tarjeta', A().tarjetas, pl.tarjeta)}</div>
-    <div class="field"><label>Descripción</label><input id="c-desc" value="${esc(pl.descripcion)}" placeholder="Ej. Tasa cero refrigeradora"></div>
+    <div class="field"><label>Descripción</label><input id="c-desc" value="${esc(pl.descripcion)}" placeholder="Ej. Tasa cero refrigeradora, Netflix"></div>
     <div class="field"><label>¿De quién es?</label>${seg('resp', RESP(), pl.resp)}</div>
     <div class="field"><label>Categoría</label><select id="c-cat">
       ${A().categorias.map(c => `<option ${c === pl.cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}
@@ -856,7 +917,7 @@ function formCuota(pl) {
   const info = () => {
     const k = parseInt($('#c-k').value, 10), t = parseInt($('#c-tot').value, 10);
     $('#c-info').textContent = k && t ? (k > t ? 'La cuota no puede ser mayor que el total.' : `Termina en el corte ${sumarMes(sel.value, t - k)}.`)
-      : 'Si no sabe el número de cuota, déjelo vacío: se cargará todos los meses hasta que la elimine.';
+      : 'Para una suscripción (Netflix, Spotify…) o si no sabe el número de cuota, déjelo vacío: se cargará todos los meses hasta que la elimine.';
   };
   ['#c-k', '#c-tot'].forEach(id => $(id).addEventListener('input', info));
   sel.addEventListener('change', info);
