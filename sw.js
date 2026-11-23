@@ -1,6 +1,6 @@
 // Guarda la app en el teléfono para que funcione sin internet.
 // Los datos NO pasan por aquí: viven en el almacenamiento local del navegador.
-const CACHE = 'cuentas-v7';
+const CACHE = 'cuentas-v9';
 const FILES = ['./', './index.html', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
